@@ -32,6 +32,8 @@ class LLM:
                     if attempt == max_retries - 1:
                         raise
                     sleep(3)
+            # Add a small delay after successful API call to prevent rate limiting
+            sleep(1)
             return response.choices[0].message.content
         else:
             response = self.llm.create_chat_completion(messages=messages,temperature=0)
