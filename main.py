@@ -1,10 +1,7 @@
-import arxiv
-import argparse
 import os
 import sys
-from dotenv import load_dotenv
-load_dotenv(override=True)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+import arxiv
 from pyzotero import zotero
 from recommender import rerank_paper
 from construct_email import render_email, send_email
@@ -14,6 +11,7 @@ from gitignore_parser import parse_gitignore
 from tempfile import mkstemp
 from paper import ArxivPaper
 from llm import set_global_llm
+from config import load_config
 import feedparser
 
 def get_zotero_corpus(id:str,key:str) -> list[dict]:
@@ -74,78 +72,13 @@ def get_arxiv_paper(query:str, debug:bool=False) -> list[ArxivPaper]:
     return papers
 
 
-
-parser = argparse.ArgumentParser(description='Recommender system for academic papers')
-
-def add_argument(*args, **kwargs):
-    def get_env(key:str,default=None):
-        # handle environment variables generated at Workflow runtime
-        # Unset environment variables are passed as '', we should treat them as None
-        v = os.environ.get(key)
-        if v == '' or v is None:
-            return default
-        return v
-    parser.add_argument(*args, **kwargs)
-    arg_full_name = kwargs.get('dest',args[-1][2:])
-    env_name = arg_full_name.upper()
-    env_value = get_env(env_name)
-    if env_value is not None:
-        #convert env_value to the specified type
-        if kwargs.get('type') == bool:
-            env_value = env_value.lower() in ['true','1']
-        else:
-            env_value = kwargs.get('type')(env_value)
-        parser.set_defaults(**{arg_full_name:env_value})
-
-
 if __name__ == '__main__':
-    
-    add_argument('--zotero_id', type=str, help='Zotero user ID')
-    add_argument('--zotero_key', type=str, help='Zotero API key')
-    add_argument('--zotero_ignore',type=str,help='Zotero collection to ignore, using gitignore-style pattern.')
-    add_argument('--send_empty', type=bool, help='If get no arxiv paper, send empty email',default=False)
-    add_argument('--max_paper_num', type=int, help='Maximum number of papers to recommend',default=100)
-    add_argument('--arxiv_query', type=str, help='Arxiv search query')
-    add_argument('--smtp_server', type=str, help='SMTP server')
-    add_argument('--smtp_port', type=int, help='SMTP port')
-    add_argument('--sender', type=str, help='Sender email address')
-    add_argument('--receiver', type=str, help='Receiver email address')
-    add_argument('--sender_password', type=str, help='Sender email password')
-    add_argument(
-        "--use_llm_api",
-        type=bool,
-        help="Use OpenAI API to generate TLDR",
-        default=False,
-    )
-    add_argument(
-        "--openai_api_key",
-        type=str,
-        help="OpenAI API key",
-        default=None,
-    )
-    add_argument(
-        "--openai_api_base",
-        type=str,
-        help="OpenAI API base URL",
-        default="https://api.openai.com/v1",
-    )
-    add_argument(
-        "--model_name",
-        type=str,
-        help="LLM Model Name",
-        default="gpt-4o",
-    )
-    add_argument(
-        "--language",
-        type=str,
-        help="Language of TLDR",
-        default="English",
-    )
-    parser.add_argument('--debug', action='store_true', help='Debug mode')
-    args = parser.parse_args()
-    assert (
-        not args.use_llm_api or args.openai_api_key is not None
-    )  # If use_llm_api is True, openai_api_key must be provided
+    try:
+        args = load_config()
+    except ValueError as exc:
+        logger.error(str(exc))
+        sys.exit(2)
+
     if args.debug:
         logger.remove()
         logger.add(sys.stdout, level="DEBUG")
@@ -179,8 +112,15 @@ if __name__ == '__main__':
             logger.info("Using Local LLM as global LLM.")
             set_global_llm(lang=args.language)
 
-    html = render_email(papers)
+    html = render_email(papers, language=args.language)
     logger.info("Sending email...")
-    send_email(args.sender, args.receiver, args.sender_password, args.smtp_server, args.smtp_port, html)
+    send_email(
+        args.sender,
+        args.receiver,
+        args.sender_password,
+        args.smtp_server,
+        args.smtp_port,
+        html,
+        language=args.language,
+    )
     logger.success("Email sent successfully! If you don't receive the email, please check the configuration and the junk box.")
-

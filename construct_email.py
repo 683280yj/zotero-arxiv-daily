@@ -39,27 +39,41 @@ framework = """
 
 <br><br>
 <div>
-To unsubscribe, remove your email in your Github Action setting.
+__FOOTER__
 </div>
 
 </body>
 </html>
 """
 
-def get_empty_html():
+def is_chinese(language: str) -> bool:
+  return language.lower().startswith('chinese') or language.lower().startswith('zh')
+
+def get_footer(language: str) -> str:
+  if is_chinese(language):
+    return '如需停止接收，请删除 GitHub Actions Secret 中的收件邮箱配置。'
+  return 'To unsubscribe, remove your email in your Github Action setting.'
+
+def get_empty_html(language: str):
   block_template = """
   <table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-family: Arial, sans-serif; border: 1px solid #ddd; border-radius: 8px; padding: 16px; background-color: #f9f9f9;">
   <tr>
     <td style="font-size: 20px; font-weight: bold; color: #333;">
-        No Papers Today. Take a Rest!
+        __EMPTY_TEXT__
     </td>
   </tr>
   </table>
   """
-  return block_template
+  empty_text = '今日暂无新论文，休息一下吧。' if is_chinese(language) else 'No Papers Today. Take a Rest!'
+  return block_template.replace('__EMPTY_TEXT__', empty_text)
 
-def get_block_html(title:str, authors:str, rate:str,arxiv_id:str, abstract:str, pdf_url:str, code_url:str=None, affiliations:str=None):
+def get_block_html(title:str, authors:str, rate:str,arxiv_id:str, abstract:str, pdf_url:str, code_url:str=None, affiliations:str=None, language: str='English'):
     code = f'<a href="{code_url}" style="display: inline-block; text-decoration: none; font-size: 14px; font-weight: bold; color: #fff; background-color: #5bc0de; padding: 8px 16px; border-radius: 4px; margin-left: 8px;">Code</a>' if code_url else ''
+    relevance_label = '相关度' if is_chinese(language) else 'Relevance'
+    arxiv_label = 'arXiv 编号' if is_chinese(language) else 'arXiv ID'
+    tldr_label = '摘要推荐' if is_chinese(language) else 'TLDR'
+    code_label = '代码' if is_chinese(language) else 'Code'
+    code = code.replace('>Code<', f'>{code_label}<')
     block_template = """
     <table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-family: Arial, sans-serif; border: 1px solid #ddd; border-radius: 8px; padding: 16px; background-color: #f9f9f9;">
     <tr>
@@ -76,17 +90,17 @@ def get_block_html(title:str, authors:str, rate:str,arxiv_id:str, abstract:str, 
     </tr>
     <tr>
         <td style="font-size: 14px; color: #333; padding: 8px 0;">
-            <strong>Relevance:</strong> {rate}
+            <strong>{relevance_label}:</strong> {rate}
         </td>
     </tr>
     <tr>
         <td style="font-size: 14px; color: #333; padding: 8px 0;">
-            <strong>arXiv ID:</strong> <a href="https://arxiv.org/abs/{arxiv_id}" target="_blank">{arxiv_id}</a>
+            <strong>{arxiv_label}:</strong> <a href="https://arxiv.org/abs/{arxiv_id}" target="_blank">{arxiv_id}</a>
         </td>
     </tr>
     <tr>
         <td style="font-size: 14px; color: #333; padding: 8px 0;">
-            <strong>TLDR:</strong> {abstract}
+            <strong>{tldr_label}:</strong> {abstract}
         </td>
     </tr>
 
@@ -98,7 +112,19 @@ def get_block_html(title:str, authors:str, rate:str,arxiv_id:str, abstract:str, 
     </tr>
 </table>
 """
-    return block_template.format(title=title, authors=authors,rate=rate,arxiv_id=arxiv_id, abstract=abstract, pdf_url=pdf_url, code=code, affiliations=affiliations)
+    return block_template.format(
+        title=title,
+        authors=authors,
+        rate=rate,
+        arxiv_id=arxiv_id,
+        abstract=abstract,
+        pdf_url=pdf_url,
+        code=code,
+        affiliations=affiliations,
+        relevance_label=relevance_label,
+        arxiv_label=arxiv_label,
+        tldr_label=tldr_label,
+    )
 
 def get_stars(score:float):
     full_star = '<span class="full-star">⭐</span>'
@@ -117,10 +143,10 @@ def get_stars(score:float):
         return '<div class="star-wrapper">'+full_star * full_star_num + half_star * half_star_num + '</div>'
 
 
-def render_email(papers:list[ArxivPaper]):
+def render_email(papers:list[ArxivPaper], language: str='English'):
     parts = []
     if len(papers) == 0 :
-        return framework.replace('__CONTENT__', get_empty_html())
+        return framework.replace('__CONTENT__', get_empty_html(language)).replace('__FOOTER__', get_footer(language))
     
     for p in tqdm(papers,desc='Rendering Email'):
         rate = get_stars(p.score)
@@ -137,22 +163,25 @@ def render_email(papers:list[ArxivPaper]):
             if len(p.affiliations) > 5:
                 affiliations += ', ...'
         else:
-            affiliations = 'Unknown Affiliation'
-        parts.append(get_block_html(p.title, authors,rate,p.arxiv_id ,p.tldr, p.pdf_url, p.code_url, affiliations))
+            affiliations = '未知机构' if is_chinese(language) else 'Unknown Affiliation'
+        parts.append(get_block_html(p.title, authors,rate,p.arxiv_id ,p.tldr, p.pdf_url, p.code_url, affiliations, language=language))
 
     content = '<br>' + '</br><br>'.join(parts) + '</br>'
-    return framework.replace('__CONTENT__', content)
+    return framework.replace('__CONTENT__', content).replace('__FOOTER__', get_footer(language))
 
-def send_email(sender:str, receiver:str, password:str,smtp_server:str,smtp_port:int, html:str,):
+def send_email(sender:str, receiver:str, password:str,smtp_server:str,smtp_port:int, html:str, language: str='English'):
     def _format_addr(s):
         name, addr = parseaddr(s)
         return formataddr((Header(name, 'utf-8').encode(), addr))
 
     msg = MIMEText(html, 'html', 'utf-8')
-    msg['From'] = _format_addr('Github Action <%s>' % sender)
-    msg['To'] = _format_addr('You <%s>' % receiver)
+    sender_name = '每日 Zotero 论文推荐' if is_chinese(language) else 'Github Action'
+    receiver_name = '你' if is_chinese(language) else 'You'
+    msg['From'] = _format_addr(f'{sender_name} <{sender}>')
+    msg['To'] = _format_addr(f'{receiver_name} <{receiver}>')
     today = datetime.datetime.now().strftime('%Y/%m/%d')
-    msg['Subject'] = Header(f'Daily arXiv {today}', 'utf-8').encode()
+    subject = f'每日 arXiv 推荐 {today}' if is_chinese(language) else f'Daily arXiv {today}'
+    msg['Subject'] = Header(subject, 'utf-8').encode()
 
     try:
         server = smtplib.SMTP(smtp_server, smtp_port)
